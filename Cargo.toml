@@ -1,9 +1,13 @@
 [package]
 name = "sparking-lot-core"
-authors = [ "Julius Janeliūnas"]
+description = "A simple implementation of parking on addresses."
+license = "MIT"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+categories = ["concurrency"]
+readme = "README.md"
+repository = "https://github.com/JuliusEmperorOfRome/sparking-lot-core"
+authors = ["Julius Janeliūnas"]
 
 [features]
 # Increases memory consumption but now has smaller load

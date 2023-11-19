@@ -1,20 +1,55 @@
+#![deny(missing_docs)]
+#![doc = include_str!("../README.md")]
 mod loom;
-
 mod park;
 mod parking_lot;
 
+/// Parks the current thread on `addr` if `expected` is true.
+///
+/// `expected` is invoked with `addr` under a lock, ensuring that
+/// if [`unpark_one`] or [`unpark_all`] is called on `addr` after
+/// making `expected` return false, `park` will either have exited
+/// or already made the thread wakeable, meaning unparks won't be lost.
+/// As such code like this will not deadlock.
+///
+/// ```rust,no_run
+/// use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+/// static wake_up: AtomicBool = AtomicBool::new(false);
+///
+/// fn wait_for_event() {
+///     sparking_lot_core::park((&wake_up as *const _).cast(), |ptr| {
+///         let wake_up = unsafe {&*(ptr as *const AtomicBool)};
+///         wake_up.load(Relaxed) == false
+///     })
+/// }
+///
+/// fn notify_event_happened() {
+///     wake_up.store(1, Relaxed);
+///     sparking_lot_core::unpark_one((&wake_up as *const _).cast())
+/// }
+/// ```
 #[cfg_attr(not(loom), inline(always))]
 #[cfg_attr(loom, track_caller)]
 pub fn park(addr: *const (), expected: impl FnOnce(*const ()) -> bool) {
     parking_lot::park(addr, expected)
 }
 
+/// Wakes one thread [`parked`](park) on `addr`.
+///
+/// If no thread is waiting on `addr`, no thread
+/// is woken, but it still requires locking, so it's
+/// not recommended to call it without reason.
 #[cfg_attr(not(loom), inline(always))]
 #[cfg_attr(loom, track_caller)]
 pub fn unpark_one(addr: *const ()) {
     parking_lot::unpark_one(addr);
 }
 
+/// Wakes all threads [`parked`](park) on `addr`.
+///
+/// If no thread is waiting on `addr`, no thread
+/// is woken, but it still requires locking, so it's
+/// not recommended to call it without reason.
 #[cfg_attr(not(loom), inline(always))]
 #[cfg_attr(loom, track_caller)]
 pub fn unpark_all(addr: *const ()) {
@@ -96,6 +131,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] //takes ~15 min
     fn unpark_all_bucket_collision_var1() {
         loom::model(|| {
             let arc1 = Arc::new(AtomicUsize::new(0));
@@ -134,6 +170,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] //takes ~30 min
     fn unpark_all_bucket_collision_var2() {
         loom::model(|| {
             let arc1 = Arc::new(AtomicUsize::new(0));
