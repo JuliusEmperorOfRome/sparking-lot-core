@@ -1,4 +1,3 @@
-#[allow(unused_imports)]
 mod loom;
 
 mod park;
