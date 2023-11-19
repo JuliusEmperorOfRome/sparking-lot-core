@@ -7,24 +7,25 @@ mod parking_lot;
 /// Parks the current thread on `addr` until notified,
 /// but only if `expected` returns true.
 ///
-/// The argument of `expected` is `addr`. `expected` stays
-/// within the scope of `park`.
-/// The memory pointed to by `addr` isn't writter to,
-/// it isn't read and no references to it are formed.
+/// # Safety
+///
+/// While this function itself is safe, using addresses that you
+/// don't own is highly discouraged. This is because if multiple
+/// libraries/modules/anything park on the same address without
+/// knowledge of each other, it will cause something that from
+/// their perspective looks like spurious wake-ups, which `park`
+/// guarantees not to happen (unlike [`std::thread::park`]).
 ///
 /// # Notes
 ///
-/// This function ensures that if one thread is parking and
-/// another thread disables `expected` and only after that
-/// calls [`unpark_one`] or [`unpark_all`] at least once,
-/// `park` **will** exit.
+/// - The argument of `expected` is `addr`.
+/// - The memory pointed to by `addr` isn't writter to,
+/// it isn't read and no references to it are formed.
+/// - This function ensures that if  another thread does
+/// something that would cause `expected` to return false
+/// and only then calls [`unpark_one`] or [`unpark_all`],
+/// `park` will either be woken up or will not sleep.
 ///
-/// It is highly discouraged to use addresses that you don't own.
-/// If two libraries/modules/anything else park on the same address
-/// without knowledge of each other, it will cause something that
-/// from their perspective looks like spurious wake-ups, even though
-/// spurious wake-ups don't actually happen with this `park`
-/// (unlike [`std::thread::park`]).
 ///
 /// # Example
 ///
@@ -52,7 +53,7 @@ mod parking_lot;
 /// ```
 #[cfg_attr(not(loom), inline(always))]
 #[cfg_attr(loom, track_caller)]
-pub fn park(addr: *const (), expected: impl FnOnce(*const ()) -> bool) {
+pub unsafe fn park(addr: *const (), expected: impl FnOnce(*const ()) -> bool) {
     parking_lot::park(addr, expected)
 }
 
@@ -61,8 +62,6 @@ pub fn park(addr: *const (), expected: impl FnOnce(*const ()) -> bool) {
 /// If no thread is waiting on `addr`, no thread
 /// is woken, but it still requires locking, so it's
 /// not recommended to call it without reason.
-///
-/// For many threads [`unpark_all`] should be prefered.
 #[cfg_attr(not(loom), inline(always))]
 #[cfg_attr(loom, track_caller)]
 pub fn unpark_one(addr: *const ()) {
@@ -74,8 +73,6 @@ pub fn unpark_one(addr: *const ()) {
 /// If no thread is waiting on `addr`, no thread
 /// is woken, but it still requires locking, so it's
 /// not recommended to call it without reason.
-///
-/// For one thread [`unpark_one`] should be prefered.
 #[cfg_attr(not(loom), inline(always))]
 #[cfg_attr(loom, track_caller)]
 pub fn unpark_all(addr: *const ()) {
