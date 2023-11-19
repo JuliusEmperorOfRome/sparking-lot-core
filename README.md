@@ -26,31 +26,21 @@ use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::thread;
 
 fn main() {
-    static wake: AtomicBool = AtomicBool::new(false);
+    static WAKE_UP: AtomicBool = AtomicBool::new(false);
     let t = thread::spawn(|| {
-        park(&wake as *const _ as *const _, |ptr| {
-            /* park only uses `addr` like `addr as usize`.
-             * It doesn't dereference, read or write to the
-             * underlying memory. You can actually pass it
-             * dangling pointers for all `park` cares. This
-             * is also true for `unpark_one` and `unpark_all`.
-             * 
-             * This means that if you pass in *mut T you
-             * can safely cast `ptr` back to *mut T, if
-             * you pass in &T, you can safely dereference
-             * `ptr` to &T and so on.
-             */
-            unsafe {&*ptr}.load(Relaxed) == false
-            // This means if `wake` == false, park this thread.
-        })
+        unsafe{
+            park(&WAKE_UP as *const _ as *const _, || {
+                !WAKE_UP.load(Relaxed)
+            });
+        };
     });
     /* Since Relaxed stores/loads are used, this wouldn't guarantee
-     * the ordering of loads/stores to not `wake`.
+     * the ordering of loads/stores to other variables.
      * 
      * But this is guaranteed to exit.
      */
-    wake.store(true, Relaxed);
-    unpark_one(&wake as *const _ as *const _);
+    WAKE_UP.store(true, Relaxed);
+    unpark_one(&WAKE_UP as *const _ as *const _);
     t.join().unwrap();
 }
 ```
