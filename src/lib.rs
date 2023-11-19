@@ -4,13 +4,29 @@ mod loom;
 mod park;
 mod parking_lot;
 
-/// Parks the current thread on `addr` if `expected` is true.
+/// Parks the current thread on `addr` until notified,
+/// but only if `expected` returns true.
 ///
-/// `expected` is invoked with `addr` under a lock, ensuring that
-/// if [`unpark_one`] or [`unpark_all`] is called on `addr` after
-/// making `expected` return false, `park` will either have exited
-/// or already made the thread wakeable, meaning unparks won't be lost.
-/// As such code like this will not deadlock.
+/// The argument of `expected` is `addr`. `expected` stays
+/// within the scope of `park`.
+/// The memory pointed to by `addr` isn't writter to,
+/// it isn't read and no references to it are formed.
+///
+/// # Notes
+///
+/// This function ensures that if one thread is parking and
+/// another thread disables `expected` and only after that
+/// calls [`unpark_one`] or [`unpark_all`] at least once,
+/// `park` **will** exit.
+///
+/// It is highly discouraged to use addresses that you don't own.
+/// If two libraries/modules/anything else park on the same address
+/// without knowledge of each other, it will cause something that
+/// from their perspective looks like spurious wake-ups, even though
+/// spurious wake-ups don't actually happen with this `park`
+/// (unlike [`std::thread::park`]).
+///
+/// # Example
 ///
 /// ```rust,no_run
 /// use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
@@ -18,6 +34,12 @@ mod parking_lot;
 ///
 /// fn wait_for_event() {
 ///     sparking_lot_core::park((&wake_up as *const _).cast(), |ptr| {
+///         /* SAFETY:
+///          * - `ptr` is the address of `wake_up`
+///          *  - `park` doesn't write, read or form references using `ptr`
+///          *  - this closure is invoked before `park` returns, so even
+///          *  the locals of `wait_for_event` are alive.
+///          */
 ///         let wake_up = unsafe {&*(ptr as *const AtomicBool)};
 ///         wake_up.load(Relaxed) == false
 ///     })
@@ -34,22 +56,26 @@ pub fn park(addr: *const (), expected: impl FnOnce(*const ()) -> bool) {
     parking_lot::park(addr, expected)
 }
 
-/// Wakes one thread [`parked`](park) on `addr`.
+/// Wakes one thread [`parked`](park()) on `addr`.
 ///
 /// If no thread is waiting on `addr`, no thread
 /// is woken, but it still requires locking, so it's
 /// not recommended to call it without reason.
+///
+/// For many threads [`unpark_all`] should be prefered.
 #[cfg_attr(not(loom), inline(always))]
 #[cfg_attr(loom, track_caller)]
 pub fn unpark_one(addr: *const ()) {
     parking_lot::unpark_one(addr);
 }
 
-/// Wakes all threads [`parked`](park) on `addr`.
+/// Wakes all threads [`parked`](park()) on `addr`.
 ///
 /// If no thread is waiting on `addr`, no thread
 /// is woken, but it still requires locking, so it's
 /// not recommended to call it without reason.
+///
+/// For one thread [`unpark_one`] should be prefered.
 #[cfg_attr(not(loom), inline(always))]
 #[cfg_attr(loom, track_caller)]
 pub fn unpark_all(addr: *const ()) {

@@ -66,6 +66,13 @@ case with different buckets, since a shared bucket can introduce synchronisation
 not be present when using different buckets (the only way to guarantee the same bucket when
 not running loom is to use the same address with `park`);
 
+## Features
+
+- `more-concurrency` - increases the number of buckets, which reduces contention, but requires
+more memory. This flag is unlikely to produce meaningful results if thread count is below 100,
+but it also isn't all that expensive &mdash; in the worst case it uses 24 extra KiB of RAM
+(adds ~12 KiB for x86-64).
+
 [`parking_lot_core`]: https://crates.io/crates/parking_lot_core
 [`parking_lot`]: https://crates.io/crates/parking_lot
 [`loom 0.5`]: https://crates.io/crates/loom/0.5.6
