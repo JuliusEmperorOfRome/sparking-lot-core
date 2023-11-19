@@ -5,7 +5,7 @@ the backend of [`parking_lot`]. It doesn't include timeouts and park or unpark
 tokens, and doesn't readjust based on thread count, so going above certain thread
 counts (96 by default, 384 with the `more-concurrency` feature) it scales worse
 than [`parking_lot_core`]. However, it has static memory usage and when platform
-specific parkers are implemented will most likely be faster than [`parking-lot-core`].
+specific parkers are implemented will most likely be faster than [`parking_lot_core`].
 Most importantly, `sparking-lot-core` has **[`loom 0.5`]** support with `--cfg loom`
 for concurrency testing.
 
