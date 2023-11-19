@@ -1,0 +1,17 @@
+[package]
+name = "sparking-lot-core"
+authors = [ "Julius Janeliūnas"]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[features]
+# Increases memory consumption but now has smaller load
+# than parking-lot until 384 threads instead of 96.
+#
+# Note that memory consumption is static and
+# in the worst case goes to ~32Kib.
+more-concurrency = []
+
+[target.'cfg(loom)'.dependencies]
+loom = { version = "0.5", features = ["checkpoint"] }
