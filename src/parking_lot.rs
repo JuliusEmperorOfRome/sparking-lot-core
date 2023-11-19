@@ -155,10 +155,10 @@ fn with_thread_data<R>(f: impl FnOnce(&ThreadData) -> R) -> R {
     }
 }
 
-pub(super) fn park(addr: *const (), expected: impl FnOnce(*const ()) -> bool) {
+pub(super) fn park(addr: *const (), expected: impl FnOnce() -> bool) {
     with_thread_data(|thread_data| {
         let bucket = lock_bucket(addr);
-        if !expected(addr) {
+        if !expected() {
             return;
         }
 
@@ -184,53 +184,58 @@ pub(super) fn park(addr: *const (), expected: impl FnOnce(*const ()) -> bool) {
         drop(bucket);
 
         // TODO: remove after implementing `Parker`s which guarantee no panics.
-        let mut on_panic = OnDrop(Some(|| {
-            release(addr, thread_data);
-            // Slight modification of `unpark_one`
-            #[cold]
-            fn release(addr: *const (), thread_data: &ThreadData) {
-                let bucket = lock_bucket(addr);
-                let mut current = bucket.first.get();
-                let mut previous = ptr::null();
-                /*SAFETY:
-                 * - sleeping threads can't destroy their ThreadData.
-                 * - the bucket is locked, so threads can't be unlinked by others.
-                 * So, if `*const ThreadData` isn't null, then it's safe to dereference.
-                 */
-                unsafe {
-                    while !current.is_null() {
-                        let next = (*current).next.get();
-                        if ptr::eq(current, thread_data) {
-                            // fix tail if needed, goes first to deduce `previous`
-                            if current == bucket.last.get() {
-                                bucket.last.set(previous);
-                            }
-                            // remove `current` from the list
-                            if previous.is_null() {
-                                bucket.first.set(next);
-                            } else {
-                                (*previous).next.set(next);
-                            }
+        let on_panic = {
+            use core::mem::MaybeUninit;
 
-                            return;
-                        }
-                        previous = current;
-                        current = next;
-                    }
+            struct OnDrop<F: FnOnce()>(MaybeUninit<F>);
+            impl<F: FnOnce()> Drop for OnDrop<F> {
+                fn drop(&mut self) {
+                    // Always initialised
+                    unsafe { self.0.assume_init_read()() };
                 }
             }
-        }));
+            OnDrop(MaybeUninit::new(|| {
+                release(addr, thread_data);
+                // Slight modification of `unpark_one`
+                #[cold]
+                fn release(addr: *const (), thread_data: &ThreadData) {
+                    let bucket = lock_bucket(addr);
+                    let mut current = bucket.first.get();
+                    let mut previous = ptr::null();
+                    /*SAFETY:
+                     * - sleeping threads can't destroy their ThreadData.
+                     * - the bucket is locked, so threads can't be unlinked by others.
+                     * So, if `*const ThreadData` isn't null, then it's safe to dereference.
+                     */
+                    unsafe {
+                        while !current.is_null() {
+                            let next = (*current).next.get();
+                            if ptr::eq(current, thread_data) {
+                                // fix tail if needed, goes first to deduce `previous`
+                                if current == bucket.last.get() {
+                                    bucket.last.set(previous);
+                                }
+                                // remove `current` from the list
+                                if previous.is_null() {
+                                    bucket.first.set(next);
+                                } else {
+                                    (*previous).next.set(next);
+                                }
+
+                                return;
+                            }
+                            previous = current;
+                            current = next;
+                        }
+                    }
+                }
+            }))
+        };
 
         thread_data.parker.park();
 
-        // disengage panic guard
-        on_panic.0.take();
-        struct OnDrop<F: FnOnce()>(Option<F>);
-        impl<F: FnOnce()> Drop for OnDrop<F> {
-            fn drop(&mut self) {
-                self.0.take().map(|f| f());
-            }
-        }
+        //disengage panic guard
+        core::mem::forget(on_panic);
     });
 }
 
