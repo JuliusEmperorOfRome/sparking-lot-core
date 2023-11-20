@@ -63,7 +63,7 @@ but it also isn't all that expensive &mdash; in the worst case it uses 24 extra 
 
 ## License
 
-This project is licensed under the [MIT LISENCE](https://github.com/JuliusEmperorOfRome/sparking-lot-core/blob/master/LICENSE)
+This project is licensed under the [MIT LICENSE](https://github.com/JuliusEmperorOfRome/sparking-lot-core/blob/master/LICENSE)
 
 [`parking_lot_core`]: https://crates.io/crates/parking_lot_core
 [`parking_lot`]: https://crates.io/crates/parking_lot
