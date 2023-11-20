@@ -4,10 +4,8 @@
 the backend of [`parking_lot`]. It doesn't include timeouts and park or unpark
 tokens, and doesn't readjust based on thread count, so going above certain thread
 counts (96 by default, 384 with the `more-concurrency` feature) it scales worse
-than [`parking_lot_core`]. However, it has static memory usage and when platform
-specific parkers are implemented will most likely be faster than [`parking_lot_core`].
-Most importantly, `sparking-lot-core` has **[`loom 0.5`]** support with `--cfg loom`
-for concurrency testing.
+than [`parking_lot_core`]. However, it has static memory usage and, most importantly, `sparking-lot-core` has **[`loom 0.7`]** support with `--cfg loom` for concurrency
+testing.
 
 ## Usage
 
@@ -65,5 +63,5 @@ but it also isn't all that expensive &mdash; in the worst case it uses 24 extra 
 
 [`parking_lot_core`]: https://crates.io/crates/parking_lot_core
 [`parking_lot`]: https://crates.io/crates/parking_lot
-[`loom 0.5`]: https://crates.io/crates/loom/0.5.6
-[`loom`]: https://crates.io/crates/loom/0.5.6
+[`loom 0.7`]: https://crates.io/crates/loom/0.7.0
+[`loom`]: https://crates.io/crates/loom/0.7.0

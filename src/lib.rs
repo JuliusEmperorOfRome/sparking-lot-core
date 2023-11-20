@@ -92,15 +92,16 @@ mod tests {
         loom::model(|| {
             let arc = Arc::new(AtomicUsize::new(0));
 
-            {
+            let h = {
                 let arc = arc.clone();
                 thread::spawn(move || {
                     arc.store(1, Relaxed);
                     super::unpark_one(0 as *const ());
-                });
-            }
+                })
+            };
             unsafe { super::park(0 as *const (), || arc.load(Relaxed) == 0) };
             assert_eq!(arc.load(Relaxed), 1);
+            h.join().unwrap();
         });
     }
 
