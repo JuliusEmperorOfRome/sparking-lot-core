@@ -61,6 +61,10 @@ more memory. This flag is unlikely to produce meaningful results if thread count
 but it also isn't all that expensive &mdash; in the worst case it uses 24 extra KiB of RAM
 (adds ~12 KiB for x86-64).
 
+## License
+
+This project is licensed under the [MIT LISENCE](https://github.com/JuliusEmperorOfRome/sparking-lot-core/blob/master/LICENSE)
+
 [`parking_lot_core`]: https://crates.io/crates/parking_lot_core
 [`parking_lot`]: https://crates.io/crates/parking_lot
 [`loom 0.7`]: https://crates.io/crates/loom/0.7.0
