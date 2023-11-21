@@ -1,11 +1,12 @@
-# sparking-lot-core
+# [sparking-lot-core][me]
 
-`s(implified-)parking-lot-core` is a simplified version of [`parking_lot_core`],
+[`s(implified-)parking-lot-core`][me] is a simplified version of [`parking_lot_core`],
 the backend of [`parking_lot`]. It doesn't include timeouts and park or unpark
 tokens, and doesn't readjust based on thread count, so going above certain thread
-counts (96 by default, 384 with the `more-concurrency` feature) it scales worse
-than [`parking_lot_core`]. However, it has static memory usage and, most importantly, `sparking-lot-core` has **[`loom 0.7`]** support with `--cfg loom` for concurrency
-testing.
+counts (96 by default, 384 with the [`more-concurrency`](#features) feature), will
+lead to worse than [`parking_lot_core`]. However, it has static memory usage and,
+most importantly, [`sparking-lot-core`][me] has **[`loom 0.7`][`loom`]** support
+with `--cfg loom` for concurrency testing.
 
 ## Usage
 
@@ -46,17 +47,30 @@ fn main() {
 ## [`loom`]
 
 [`loom`] requires consistency in it's executions, but program addresses are intentionally
-random on most platforms. As such, when using [`loom`] you may want to pass [`usize`](https://doc.rust-lang.org/std/primitive.usize.html)
-constants instead of addresses. `sparking-lot-core` has two types of parking: different
-addresses may or may not map to the same bucket. When running [`loom`], there are 2 buckets:
-one for even addresses, one for odd addresses. In loom tests you should at least include the
-case with different buckets, since a shared bucket can introduce synchronisation that will
-not be present when using different buckets (the only way to guarantee the same bucket when
-not running loom is to use the same address with `park`). For example, when implementing a
-SPSC channel, the sender could park on `<address of inner state>` and the receiver
-on <code>\<address of inner state>.[cast]::<[u8]>().[offset]`(1)`</code> to park on different
-buckets. A nice property of this approach is that it also works in non-loom contexts as long
-as your type is at least 2 bytes.
+random on most platforms. As such, when using [`loom`], there are things to keep in mind.
+When `parking` on different addresses, there are two possible outcomes: they may map to
+the same bucket, providing more synchronisation, or different ones. This additional
+synchronisation shouldn't be relied on &mdash; the only way to guarantee the same bucket
+when not running [`loom`] is to use the same address with `park`. To give users control
+over this, when running [`loom`], there are 2 buckets: one for even addresses, one for odd
+addresses. In loom tests you should at least include the case with different buckets, since
+a shared bucket will provide more synchronisation and it shouldn't be really possible that 
+looser synchronisation will exclude the states possible with stricter ones. One approach is
+to use one base address, [`cast`][cast] to [`u8`][u8] and then
+[`offset`][offset] by 1. For example, when implementing a SPSC channel, the sender
+could park on *`<address of inner state>`* and the receiver on
+<code style="white-space: nowrap;"><i>\<address of inner state></i>.[cast]::<[u8]>().[offset]`(1)`</code> to park on different
+buckets. A nice property of this approach is that it also works in non-loom contexts where
+normally you would park on two non-ZST members. The current integration of [`loom`] has some
+big flaws:
+- No more than 2 distinct addresses can be used if you want to properly test the case of
+non-colliding buckets.
+- Requires some extra work to use [`loom`].
+- Dependents of dependents of [`sparking-lot-core`][me] can't really use loom tests, because
+it can easily become impossible to test the case of non-colliding buckets.
+
+However, changing this behsviour would be a breaking change, so it will stay this way for probably
+a long time.
 
 ## Features
 
@@ -67,12 +81,13 @@ but it also isn't all that expensive &mdash; in the worst case it uses 24 extra 
 
 ## License
 
-This project is licensed under the ([MIT LICENSE](LICENSE) or https://github.com/JuliusEmperorOfRome/sparking-lot-core/blob/master/LICENSE)
+This project is licensed under the [MIT LICENSE](https://github.com/JuliusEmperorOfRome/sparking-lot-core/blob/master/LICENSE)
 
+[me]: https://crates.io/crates/sparking-lot-core
 [`parking_lot_core`]: https://crates.io/crates/parking_lot_core
 [`parking_lot`]: https://crates.io/crates/parking_lot
-[`loom 0.7`]: https://crates.io/crates/loom/0.7.0
 [`loom`]: https://crates.io/crates/loom/0.7.0
+[`byte_offset`]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.byte_offset
 [u8]: https://doc.rust-lang.org/stable/core/primitive.u8.html
 [cast]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.cast
 [offset]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.offset
