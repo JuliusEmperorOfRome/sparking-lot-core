@@ -52,7 +52,11 @@ addresses may or may not map to the same bucket. When running [`loom`], there ar
 one for even addresses, one for odd addresses. In loom tests you should at least include the
 case with different buckets, since a shared bucket can introduce synchronisation that will
 not be present when using different buckets (the only way to guarantee the same bucket when
-not running loom is to use the same address with `park`);
+not running loom is to use the same address with `park`). For example, when implementing a
+SPSC channel, the sender could park on `<address of inner state>` and the receiver
+on <code>\<address of inner state>.[cast]::<[u8]>().[offset]`(1)`</code> to park on different
+buckets. A nice property of this approach is that it also works in non-loom contexts as long
+as your type is at least 2 bytes.
 
 ## Features
 
@@ -63,9 +67,12 @@ but it also isn't all that expensive &mdash; in the worst case it uses 24 extra 
 
 ## License
 
-This project is licensed under the [MIT LICENSE](https://github.com/JuliusEmperorOfRome/sparking-lot-core/blob/master/LICENSE)
+This project is licensed under the ([MIT LICENSE](LICENSE) or https://github.com/JuliusEmperorOfRome/sparking-lot-core/blob/master/LICENSE)
 
 [`parking_lot_core`]: https://crates.io/crates/parking_lot_core
 [`parking_lot`]: https://crates.io/crates/parking_lot
 [`loom 0.7`]: https://crates.io/crates/loom/0.7.0
 [`loom`]: https://crates.io/crates/loom/0.7.0
+[u8]: https://doc.rust-lang.org/stable/core/primitive.u8.html
+[cast]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.cast
+[offset]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.offset
