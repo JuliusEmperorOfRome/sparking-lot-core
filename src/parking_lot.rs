@@ -336,6 +336,71 @@ pub(super) fn unpark_all(addr: *const ()) {
     }
 }
 
+pub(super) fn unpark_some(addr: *const (), count: usize) {
+    let bucket = lock_bucket(addr);
+    let mut current = bucket.first.get();
+    let mut previous = ptr::null();
+
+    let unpark_list = Cell::new(ptr::null::<ThreadData>());
+    let mut unpark_list_tail = NonNull::from(&unpark_list);
+
+    /*SAFETY:
+     * - sleeping threads can't destroy their ThreadData.
+     * - the bucket is locked, so threads can't be unlinked by others.
+     * So, if `*const ThreadData` isn't null, then it's safe to dereference.
+     */
+    unsafe {
+        for _ in 0..count {
+            if current.is_null() {
+                break;
+            }
+            let next = (*current).next.get();
+            if (*current).addr.get() == addr {
+                // fix tail if needed, goes first to deduce `previous`
+                if current == bucket.last.get() {
+                    bucket.last.set(previous);
+                }
+                // remove `current` from the list
+                if previous.is_null() {
+                    bucket.first.set(next);
+                } else {
+                    (*previous).next.set(next);
+                }
+
+                unpark_list_tail.as_ref().set(current);
+                unpark_list_tail = NonNull::from(&(*current).next);
+            } else {
+                previous = current;
+            }
+            current = next;
+        }
+    }
+    drop(bucket);
+
+    let mut current = unpark_list.get();
+    if current.is_null() {
+        return;
+    }
+    loop {
+        /*SAFETY:
+         * - sleeping threads can't destroy their ThreadData until woken.
+         * - this thread is the only awake thread with access to them.
+         */
+        unsafe {
+            let next = (*current).next.get();
+            (*current).parker.unpark();
+
+            // `ThreadData` is repr(C) and `next` is the first element, so
+            // (`current` as *const Cell<_>) gives the address of `current->next`.
+            if ptr::eq(current as *const Cell<_>, unpark_list_tail.as_ptr()) {
+                break;
+            }
+            // now *current may be destroyed, but it's no longer accessed.
+            current = next;
+        };
+    }
+}
+
 // Alignment values taken from crossbeam(https://crates.io/crates/crossbeam/0.8.2)
 
 // Starting from Intel's Sandy Bridge, spatial prefetcher is now pulling pairs of 64-byte cache

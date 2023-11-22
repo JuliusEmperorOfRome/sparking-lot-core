@@ -67,6 +67,19 @@ pub fn unpark_one(addr: *const ()) {
     parking_lot::unpark_one(addr);
 }
 
+/// Wakes at most `count` threads [`parked`](park()) on `addr`.
+/// Should be called after making the `expected` of
+/// the corresponding [`parks`](park()) return false.
+///
+/// If no thread is waiting on `addr`, no thread
+/// is woken, but it still requires locking, so it's
+/// not recommended to call it without reason.
+#[cfg_attr(not(loom), inline(always))]
+#[cfg_attr(loom, track_caller)]
+pub fn unpark_some(addr: *const (), count: usize) {
+    parking_lot::unpark_some(addr, count);
+}
+
 /// Wakes all threads [`parked`](park()) on `addr`.
 ///
 /// Should be called after making the `expected` of
@@ -151,15 +164,80 @@ mod tests {
             };
             unsafe { super::park(0 as *const (), || arc1.load(Relaxed) == 0) };
             assert_eq!(arc1.load(Relaxed), 1);
+            h1.join().unwrap();
             unsafe { super::park(2 as *const (), || arc2.load(Relaxed) == 0) };
             assert_eq!(arc2.load(Relaxed), 1);
-            h1.join().unwrap();
             h2.join().unwrap();
         });
     }
 
     #[test]
-    #[ignore] //takes ~15 min
+    #[ignore]
+    fn unpark_some_is_bounded_lite() {
+        loom::model(|| {
+            let arc = Arc::new(AtomicUsize::new(!0));
+            let ts: [_; 2] = std::array::from_fn(|_| {
+                let arc = arc.clone();
+                thread::spawn(move || {
+                    let mut inc = 0;
+                    unsafe {
+                        super::park(0 as *const (), || {
+                            if arc.load(Relaxed) == !0 {
+                                inc = 1;
+                                true
+                            } else {
+                                false
+                            }
+                        });
+                    }
+                    arc.fetch_add(inc, Relaxed);
+                })
+            });
+            arc.store(0, Relaxed);
+            super::unpark_some(0 as *const (), 1);
+            assert!(arc.load(Relaxed) <= 1);
+            super::unpark_one(0 as *const ());
+            for t in ts {
+                t.join().unwrap();
+            }
+        });
+    }
+
+    #[test]
+    #[ignore]
+    fn unpark_some_is_bounded() {
+        loom::model(|| {
+            let arc = Arc::new(AtomicUsize::new(!0));
+            let ts: [_; 3] = std::array::from_fn(|_| {
+                let arc = arc.clone();
+                thread::spawn(move || {
+                    let mut inc = 0;
+                    unsafe {
+                        super::park(0 as *const (), || {
+                            if arc.load(Relaxed) == !0 {
+                                inc = 1;
+                                true
+                            } else {
+                                false
+                            }
+                        });
+                    }
+                    arc.fetch_add(inc, Relaxed);
+                })
+            });
+            arc.store(0, Relaxed);
+            super::unpark_some(0 as *const (), 2);
+            assert!(arc.load(Relaxed) <= 2);
+
+            super::unpark_one(0 as *const ());
+            for t in ts {
+                t.join().unwrap();
+            }
+        });
+    }
+
+    #[test]
+    #[ignore]
     fn unpark_all_bucket_collision_var1() {
         loom::model(|| {
             let arc1 = Arc::new(AtomicUsize::new(0));
@@ -198,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore] //takes ~30 min
+    #[ignore]
     fn unpark_all_bucket_collision_var2() {
         loom::model(|| {
             let arc1 = Arc::new(AtomicUsize::new(0));
