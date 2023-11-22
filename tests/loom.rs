@@ -204,12 +204,17 @@ fn unpark_all_bucket_collision_lite() {
 /// about parking permissions without loom ever seeing traffic between
 /// threads. This significantly increases loom speeds, but when used
 /// incorrectly loom may miss bugs.
-struct MagicParkToken(Arc<StdAtomUsize>);
+struct MagicParkToken(StdAtomUsize);
 
 impl MagicParkToken {
     #[inline(always)]
-    fn new() -> Self {
-        Self(Arc::new(StdAtomUsize::new(0)))
+    const fn new() -> Self {
+        Self(StdAtomUsize::new(0))
+    }
+
+    #[inline(always)]
+    fn reset(&self) {
+        self.0.store(0, Relaxed);
     }
 
     #[inline(always)]
@@ -256,10 +261,9 @@ impl MagicParkToken {
     /// adds more cases it considers errors, but no new legal executions are made. When it
     /// does park, the synchronisation is caused by real code, not `MagicParkToken`, so it's
     /// valid to assume it there.
-    unsafe fn spawn_waiter(&self, addr: *const ()) -> thread::JoinHandle<()> {
-        let token = Self(self.0.clone());
+    unsafe fn spawn_waiter(&'static self, addr: *const ()) -> thread::JoinHandle<()> {
         thread::spawn(move || {
-            unsafe { slc::park(addr, || token.can_park()) };
+            unsafe { slc::park(addr, || self.can_park()) };
         })
     }
 }
@@ -333,10 +337,11 @@ fn unpark_some_is_bounded_full() {
 
 #[test]
 fn unpark_all_bucket_collision_var1() {
+    static TOKEN1: MagicParkToken = MagicParkToken::new();
+    static TOKEN2: MagicParkToken = MagicParkToken::new();
     loom::model(|| {
-        let token1 = MagicParkToken::new();
-        let token2 = MagicParkToken::new();
-
+        TOKEN1.reset();
+        TOKEN2.reset();
         /* SAFETY:
          * - see note on `MagicParkToken::spawn_waiter`
          * - loom can interleave any of these threads to
@@ -344,18 +349,18 @@ fn unpark_all_bucket_collision_var1() {
          */
         let (h1, h2, h3) = unsafe {
             (
-                token1.spawn_waiter(0 as *const ()),
-                token1.spawn_waiter(0 as *const ()),
-                token2.spawn_waiter(2 as *const ()),
+                TOKEN1.spawn_waiter(0 as *const ()),
+                TOKEN1.spawn_waiter(0 as *const ()),
+                TOKEN2.spawn_waiter(2 as *const ()),
             )
         };
 
-        token1.stop_parks();
+        TOKEN1.stop_parks();
         slc::unpark_all(0 as *const ());
         h1.join().unwrap();
         h2.join().unwrap();
 
-        token2.stop_parks();
+        TOKEN2.stop_parks();
         slc::unpark_all(2 as *const ());
         h3.join().unwrap();
     });
@@ -363,9 +368,11 @@ fn unpark_all_bucket_collision_var1() {
 
 #[test]
 fn unpark_all_bucket_collision_var2() {
+    static TOKEN1: MagicParkToken = MagicParkToken::new();
+    static TOKEN2: MagicParkToken = MagicParkToken::new();
     loom::model(|| {
-        let token1 = MagicParkToken::new();
-        let token2 = MagicParkToken::new();
+        TOKEN1.reset();
+        TOKEN2.reset();
 
         /* SAFETY:
          * - see note on `MagicParkToken::spawn_waiter`
@@ -374,18 +381,88 @@ fn unpark_all_bucket_collision_var2() {
          */
         let (h1, h2, h3) = unsafe {
             (
-                token1.spawn_waiter(0 as *const ()),
-                token1.spawn_waiter(0 as *const ()),
-                token2.spawn_waiter(2 as *const ()),
+                TOKEN1.spawn_waiter(0 as *const ()),
+                TOKEN1.spawn_waiter(0 as *const ()),
+                TOKEN2.spawn_waiter(2 as *const ()),
             )
         };
 
-        token2.stop_parks();
+        TOKEN2.stop_parks();
         slc::unpark_all(2 as *const ());
         h3.join().unwrap();
 
-        token1.stop_parks();
+        TOKEN1.stop_parks();
         slc::unpark_all(0 as *const ());
+        h1.join().unwrap();
+        h2.join().unwrap();
+    });
+}
+
+// Should be the same as `unpark_all_bucket_collision_var1`,
+// but with the first `unpark_all(...)` replaced by
+// `unpark_some(..., 4)` and the second by `unpark_some(..., 2)`
+#[test]
+fn unpark_some_bucket_collision_var1() {
+    static TOKEN1: MagicParkToken = MagicParkToken::new();
+    static TOKEN2: MagicParkToken = MagicParkToken::new();
+    loom::model(|| {
+        TOKEN1.reset();
+        TOKEN2.reset();
+
+        /* SAFETY:
+         * - see note on `MagicParkToken::spawn_waiter`
+         * - loom can interleave any of these threads to
+         * cause every possible state.
+         */
+        let (h1, h2, h3) = unsafe {
+            (
+                TOKEN1.spawn_waiter(0 as *const ()),
+                TOKEN1.spawn_waiter(0 as *const ()),
+                TOKEN2.spawn_waiter(2 as *const ()),
+            )
+        };
+
+        TOKEN1.stop_parks();
+        slc::unpark_some(0 as *const (), 4);
+        h1.join().unwrap();
+        h2.join().unwrap();
+
+        TOKEN2.stop_parks();
+        slc::unpark_some(2 as *const (), 2);
+        h3.join().unwrap();
+    });
+}
+
+// Should be the same as `unpark_all_bucket_collision_var1`,
+// but with the first `unpark_all(...)` replaced by
+// `unpark_some(..., 4)` and the second by `unpark_some(..., 3)`
+#[test]
+fn unpark_some_bucket_collision_var2() {
+    static TOKEN1: MagicParkToken = MagicParkToken::new();
+    static TOKEN2: MagicParkToken = MagicParkToken::new();
+    loom::model(|| {
+        TOKEN1.reset();
+        TOKEN2.reset();
+
+        /* SAFETY:
+         * - see note on `MagicParkToken::spawn_waiter`
+         * - loom can interleave any of these threads to
+         * cause every possible state.
+         */
+        let (h1, h2, h3) = unsafe {
+            (
+                TOKEN1.spawn_waiter(0 as *const ()),
+                TOKEN1.spawn_waiter(0 as *const ()),
+                TOKEN2.spawn_waiter(2 as *const ()),
+            )
+        };
+
+        TOKEN2.stop_parks();
+        slc::unpark_some(2 as *const (), 4);
+        h3.join().unwrap();
+
+        TOKEN1.stop_parks();
+        slc::unpark_some(0 as *const (), 3);
         h1.join().unwrap();
         h2.join().unwrap();
     });
