@@ -336,7 +336,7 @@ pub(super) fn unpark_all(addr: *const ()) {
     }
 }
 
-pub(super) fn unpark_some(addr: *const (), count: usize) {
+pub(super) fn unpark_some(addr: *const (), mut count: usize) {
     let bucket = lock_bucket(addr);
     let mut current = bucket.first.get();
     let mut previous = ptr::null();
@@ -350,10 +350,7 @@ pub(super) fn unpark_some(addr: *const (), count: usize) {
      * So, if `*const ThreadData` isn't null, then it's safe to dereference.
      */
     unsafe {
-        for _ in 0..count {
-            if current.is_null() {
-                break;
-            }
+        while !current.is_null() {
             let next = (*current).next.get();
             if (*current).addr.get() == addr {
                 // fix tail if needed, goes first to deduce `previous`
@@ -369,6 +366,11 @@ pub(super) fn unpark_some(addr: *const (), count: usize) {
 
                 unpark_list_tail.as_ref().set(current);
                 unpark_list_tail = NonNull::from(&(*current).next);
+
+                count -= 1;
+                if count == 0 {
+                    break;
+                }
             } else {
                 previous = current;
             }

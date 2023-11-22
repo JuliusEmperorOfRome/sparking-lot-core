@@ -112,6 +112,25 @@ fn unpark_one_bucket_collision() {
 }
 
 #[test]
+fn unpark_some_walks_bucket() {
+    loom::model(|| {
+        let arc1 = Arc::new(AtomicUsize::new(0));
+        let arc2 = Arc::new(AtomicUsize::new(0));
+
+        let h1 = spawn_waiter(0, arc1.clone());
+        let h2 = spawn_waiter(2, arc2.clone());
+
+        arc1.store(1, Relaxed);
+        slc::unpark_some(0 as *const (), 1);
+        h1.join().unwrap();
+
+        arc2.store(1, Relaxed);
+        slc::unpark_some(2 as *const (), 1);
+        h2.join().unwrap();
+    })
+}
+
+#[test]
 fn unpark_some_bucket_collision_lite() {
     loom::model(|| {
         let arc1 = Arc::new(AtomicUsize::new(0));
