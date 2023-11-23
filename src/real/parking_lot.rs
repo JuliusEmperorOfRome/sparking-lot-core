@@ -1,5 +1,5 @@
-use crate::loom::{Cell, Mutex, MutexGuard};
-use crate::park::Parker;
+use crate::real::loom::{Cell, Mutex, MutexGuard};
+use crate::real::park::Parker;
 use core::ptr::{self, NonNull};
 
 #[cfg(all(not(loom), not(feature = "more-concurrency")))]
@@ -155,7 +155,7 @@ fn with_thread_data<R>(f: impl FnOnce(&ThreadData) -> R) -> R {
     }
 }
 
-pub(super) fn park(addr: *const (), expected: impl FnOnce() -> bool) {
+pub(crate) fn park(addr: *const (), expected: impl FnOnce() -> bool) {
     with_thread_data(|thread_data| {
         let bucket = lock_bucket(addr);
         if !expected() {
@@ -239,7 +239,7 @@ pub(super) fn park(addr: *const (), expected: impl FnOnce() -> bool) {
     });
 }
 
-pub(super) fn unpark_one(addr: *const ()) {
+pub(crate) fn unpark_one(addr: *const ()) {
     let bucket = lock_bucket(addr);
     let mut current = bucket.first.get();
     let mut previous = ptr::null();
@@ -274,7 +274,7 @@ pub(super) fn unpark_one(addr: *const ()) {
     }
 }
 
-pub(super) fn unpark_all(addr: *const ()) {
+pub(crate) fn unpark_all(addr: *const ()) {
     let bucket = lock_bucket(addr);
     let mut current = bucket.first.get();
     let mut previous = ptr::null();
@@ -336,7 +336,7 @@ pub(super) fn unpark_all(addr: *const ()) {
     }
 }
 
-pub(super) fn unpark_some(addr: *const (), mut count: usize) {
+pub(crate) fn unpark_some(addr: *const (), mut count: usize) {
     let bucket = lock_bucket(addr);
     let mut current = bucket.first.get();
     let mut previous = ptr::null();

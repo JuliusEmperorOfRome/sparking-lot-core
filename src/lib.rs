@@ -1,8 +1,7 @@
 #![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
-mod loom;
-mod park;
-mod parking_lot;
+mod real;
+use real::parking_lot;
 
 /// Parks the current thread on `addr` until notified,
 /// but only if `expected` returns true.

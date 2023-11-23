@@ -1,4 +1,4 @@
-use crate::loom::{Condvar, Mutex};
+use crate::real::loom::{Condvar, Mutex};
 pub(crate) struct Parker {
     should_unpark: Mutex<bool>,
     condvar: Condvar,
@@ -67,8 +67,8 @@ unsafe impl Sync for Parker {}
 #[cfg(all(test, loom))]
 mod tests {
     use super::Parker;
-    use crate::loom::Cell;
     use core::sync::atomic::Ordering::{Acquire, Release};
+    use loom::cell::Cell;
     use loom::thread;
     use std::sync::Arc;
 
