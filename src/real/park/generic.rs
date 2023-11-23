@@ -126,22 +126,32 @@ mod tests {
     #[test]
     fn synchronises_multiple_parkers() {
         loom::model(|| {
+            use core::sync::atomic::Ordering::Relaxed;
+            use loom::sync::atomic::AtomicUsize;
             loom::lazy_static! {
                 static ref PARKER1: Parker = Parker::new();
                 static ref PARKER2: Parker = Parker::new();
                 static ref WROTE: Cell<bool> = Cell::new(false);
+                static ref INIT: AtomicUsize = AtomicUsize::new(0);
             }
 
             let h1 = thread::spawn(|| {
-                PARKER1.park();
+                let parker = &*PARKER1;
+                INIT.fetch_add(1, Relaxed);
+                parker.park();
                 assert_eq!(WROTE.get(), true);
             });
 
             let h2 = thread::spawn(|| {
-                PARKER2.park();
+                let parker = &*PARKER2;
+                INIT.fetch_add(1, Relaxed);
+                parker.park();
                 assert_eq!(WROTE.get(), true);
             });
 
+            while INIT.load(Relaxed) != 2 {
+                loom::thread::yield_now();
+            }
             WROTE.set(true);
             PARKER1.unpark();
             PARKER2.unpark();
