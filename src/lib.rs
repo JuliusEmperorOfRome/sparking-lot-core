@@ -1,7 +1,15 @@
 #![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
+
+#[cfg(not(all(loom, feature = "loom-test")))]
 mod real;
+#[cfg(not(all(loom, feature = "loom-test")))]
 use real::parking_lot;
+
+#[cfg(all(loom, feature = "loom-test"))]
+mod fake;
+#[cfg(all(loom, feature = "loom-test"))]
+use fake::parking_lot;
 
 /// Parks the current thread on `addr` until notified,
 /// but only if `expected` returns true.

@@ -16,6 +16,10 @@ authors = ["Julius Janeliūnas"]
 # Note that memory consumption is static and
 # in the worst case goes to ~32Kib.
 more-concurrency = []
+# The recommended way of testing loom.
+# DO NOT spawn real threads in tests.
+# Does nothing without `--cfg loom`.
+loom-test = []
 
 [target.'cfg(loom)'.dependencies]
 loom = { version = "0.7", features = ["checkpoint"] }
