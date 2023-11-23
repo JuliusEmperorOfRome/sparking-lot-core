@@ -3,24 +3,13 @@
 compile_error!("[internal error] `mod fake` must be used with loom + feature = loom-test");
 
 pub(super) mod parking_lot {
-    use core::ptr::{self, NonNull};
+    use core::ptr;
     use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
     use loom::cell::Cell;
     use loom::sync::atomic::AtomicBool;
     use loom::sync::{Mutex, MutexGuard};
     use loom::thread::Thread;
 
-    /* # Note
-     *
-     * repr(C) is required in `unpark_all` and this is
-     * also the most compact way to store these members
-     * without some odd fusing, which shouldn't really
-     * be possible anyways. Also, it just so happens that
-     * `next` is accessed the most, `addr` is second,
-     * and `parker` is relatively cold, so this layout
-     * is good anyways.
-     */
-    #[repr(C)]
     struct ThreadData {
         next: Cell<*const ThreadData>,
         addr: Cell<*const ()>,
@@ -165,10 +154,8 @@ pub(super) mod parking_lot {
 
     pub(crate) fn unpark_some(addr: *const (), mut count: usize) {
         let bucket = lock_bucket(addr);
-        let mut current = bucket.first.get();
-
-        let unpark_list = Cell::new(ptr::null::<ThreadData>());
-        let mut unpark_list_tail = NonNull::from(&unpark_list);
+        let first = bucket.first.get();
+        let mut current = first;
 
         /*SAFETY:
          * - sleeping threads can't destroy their ThreadData.
@@ -176,48 +163,34 @@ pub(super) mod parking_lot {
          * So, if `*const ThreadData` isn't null, then it's safe to dereference.
          */
         unsafe {
-            while !current.is_null() {
-                // fix tail if needed, goes first to deduce `previous`
-                if current == bucket.last.get() {
-                    bucket.last.set(std::ptr::null());
+            loop {
+                if current.is_null() {
+                    bucket.first.set(std::ptr::null());
+                    break;
                 }
-                // remove `current` from the list
-                let next = (*current).next.get();
-                bucket.first.set(next);
-
-                unpark_list_tail.as_ref().set(current);
-                unpark_list_tail = NonNull::from(&(*current).next);
 
                 count -= 1;
                 if count == 0 {
+                    bucket.first.set((*current).next.replace(std::ptr::null()));
                     break;
                 }
-                current = next;
+
+                current = (*current).next.get();
             }
         }
         drop(bucket);
 
-        let mut current = unpark_list.get();
-        if current.is_null() {
-            return;
-        }
-        loop {
-            /*SAFETY:
-             * - sleeping threads can't destroy their ThreadData until woken.
-             * - this thread is the only awake thread with access to them.
-             */
-            unsafe {
-                let next = (*current).next.get();
-                (*current).parker.unpark();
-
-                // `ThreadData` is repr(C) and `next` is the first element, so
-                // (`current` as *const Cell<_>) gives the address of `current->next`.
-                if ptr::eq(current as *const Cell<_>, unpark_list_tail.as_ptr()) {
-                    break;
-                }
-                // now *current may be destroyed, but it's no longer accessed.
-                current = next;
-            };
+        current = first;
+        /*SAFETY:
+         * - sleeping threads can't destroy their ThreadData.
+         * - this list was removed from bucket, so we own it.
+         */
+        unsafe {
+            while !current.is_null() {
+                let node = current;
+                current = (*current).next.get();
+                (*node).parker.unpark();
+            }
         }
     }
     struct Bucket {
