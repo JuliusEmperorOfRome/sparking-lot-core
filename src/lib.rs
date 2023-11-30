@@ -23,6 +23,7 @@
 //! For more information read the function docs.
 //!
 //! # [`loom`]
+//!
 //! This crate has [`loom 0.7`][`loom`] integrated, which can be enabled with
 //! `--cfg loom` and optionally the [`loom-test`](#features) feature. Using the
 //! feature is recommended, but if it's not present, legacy [`loom`] testing will
@@ -42,7 +43,7 @@
 //! > buckets, since a shared bucket will provide more synchronisation and it shouldn't really
 //! > be possible that looser synchronisation will exclude the states possible with stricter
 //! > ones. One approach is to use a base address, and a second parking address can be made
-//! > with a [`cast`][cast] to [`u8`][u8] and then [`offsetting`][offset] by 1. For example,
+//! > with a [`cast`][cast] to [`u8`] and then [`offsetting`][offset] by 1. For example,
 //! > when implementing a SPSC channel, the sender could park on *`<address of inner state>`*
 //! > and the receiver on <code style="white-space: nowrap;">
 //! > <i>\<address of inner state></i>.[cast]::<[u8]>().[offset]`(1)`
@@ -73,7 +74,6 @@
 //! [`futexes`]: http://man7.org/linux/man-pages/man2/futex.2.html
 //! [`loom`]: https://crates.io/crates/loom/0.7.0
 //! [`byte_offset`]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.byte_offset
-//! [u8]: https://doc.rust-lang.org/stable/core/primitive.u8.html
 //! [cast]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.cast
 //! [offset]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.offset
 
@@ -231,16 +231,16 @@ pub fn unpark_one(addr: *const ()) {
 /// # Example
 ///
 /// ```
-/// # struct TaskQueue;
+/// # struct YourTaskQueue;
 /// # struct Task {};
-/// # impl TaskQueue {
+/// # impl YourTaskQueue {
 /// #     const fn new() -> Self { Self }
 /// #     fn push_task(&self, _: Task) {}
 /// #     fn pop_task(&self) -> Option<Task> { None }
 /// # }
 /// use sparking_lot_core::{park, unpark_some};
 ///
-/// static tasks: TaskQueue = TaskQueue::new();
+/// static tasks: YourTaskQueue = YourTaskQueue::new();
 ///
 /// fn add_tasks<T: Iterator<Item = Task>>(new_tasks: T) {
 ///     let mut count = 0;
