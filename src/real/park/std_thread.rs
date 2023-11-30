@@ -1,7 +1,7 @@
 use core::marker::PhantomPinned;
 use core::pin::Pin;
 use core::ptr::{self, addr_of};
-use core::sync::atomic::Ordering::{AcqRel, Acquire, Release};
+use core::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::ptr::NonNull;
 
 use crate::real::loom::thread::{self, Thread};
@@ -21,7 +21,7 @@ impl ParkerT for Parker {
          */
         if self
             .0
-            .compare_exchange(Self::notified().as_ptr(), ptr::null_mut(), Acquire, Release)
+            .compare_exchange(Self::notified().as_ptr(), ptr::null_mut(), Acquire, Relaxed)
             .is_err()
         {
             ParkEvent::with(|event| {
