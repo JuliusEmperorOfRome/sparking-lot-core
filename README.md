@@ -46,39 +46,8 @@ fn main() {
 
 ## [`loom`]
 
-[`loom`] requires consistency in it's executions, but program addresses are intentionally
-random on most platforms. As such, when using [`loom`], there are things to keep in mind.
-When `parking` on different addresses, there are two possible outcomes: they may map to
-the same bucket, which may provide extra synchronisation, or different ones, which doesn't.
-This additional synchronisation shouldn't be relied on &mdash; the only way to guarantee the
-same bucket when not running [`loom`] is to use the same address with `park`. To give users
-control over this, when running [`loom`], there are 2 buckets: one for even addresses, one
-for odd addresses. In loom tests you should at least include the case with different buckets,
-since a shared bucket will provide more synchronisation and it shouldn't be really possible
-that looser synchronisation will exclude the states possible with stricter ones. One approach
-is to use a base address, and a second parking address can be made with a [`cast`][cast] to
-[`u8`][u8] and then [`offsetting`][offset] by 1. For example, when implementing a SPSC channel,
-the sender could park on *`<address of inner state>`* and the receiver on
-<code style="white-space: nowrap;"><i>\<address of inner state></i>.[cast]::<[u8]>().[offset]`(1)`</code>
-to park on different buckets. A nice property of this approach is that it also works in
-non-loom contexts where normally you would park on two non-ZST members.
-
-### Limitations
-
-The current [`loom`] integration technique has some major drawbacks:
-
-- No more than 2 distinct addresses can be used if you want to properly test the case of
-non-colliding buckets.
-- Requires some extra work to use [`loom`].
-- Dependents of dependents of [`sparking-lot-core`][me] can't really use loom tests, because
-it can easily become impossible to test the case of non-colliding buckets.
-
-## Features
-
-- `more-concurrency` - increases the number of buckets, which reduces contention, but requires
-more memory. This flag is unlikely to produce meaningful results if thread count is below 100,
-but it also isn't all that expensive &mdash; in the worst case it uses 24 extra KiB of RAM
-(adds ~12 KiB for x86-64).
+[`loom`] is enabled with `--cfg loom`. When running loom tests, it's recommended to enable the `loom-test` feature, as the default test implementation is severely limited. The old behaviour
+is described in the [docs](https://docs.rs/sparking-lot-core/0.1.3/sparking_lot_core/).
 
 ## License
 
@@ -88,7 +57,3 @@ This project is licensed under the [MIT LICENSE](https://github.com/JuliusEmpero
 [`parking_lot_core`]: https://crates.io/crates/parking_lot_core
 [`parking_lot`]: https://crates.io/crates/parking_lot
 [`loom`]: https://crates.io/crates/loom/0.7.0
-[`byte_offset`]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.byte_offset
-[u8]: https://doc.rust-lang.org/stable/core/primitive.u8.html
-[cast]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.cast
-[offset]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.offset

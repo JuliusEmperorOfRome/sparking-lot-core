@@ -2,7 +2,7 @@
 name = "sparking-lot-core"
 description = "A simple implementation of parking on addresses."
 license = "MIT"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 categories = ["concurrency"]
 readme = "README.md"

@@ -1,5 +1,81 @@
 #![deny(missing_docs)]
-#![doc = include_str!("../README.md")]
+//! This library provides a low-level API for parking
+//! on addresses.
+//!
+//! # The parking lot
+//!
+//! To keep synchronisation primitives small, most of the parking/unparking
+//! can be off-loaded to the parking lot. This allows writing locks that may
+//! even use a single bit. The idea comes from Webkit [`WTF::ParkingLot`],
+//! which in turn was inspired by Linux [`futexes`]. The API provided by this
+//! crate is significantly simpler &mdash; no park/unpark tokens or timeouts
+//! are provided and it also doesn't readjust based on thread count, which
+//! means with large enough thread counts the contention may be worse than
+//! when using other crates.
+//!
+//! The parking lot provides two operations:
+//!
+//! - **Parking** &mdash; pausing a thread and enqueing it in a queue keyed
+//! by an address. This can be done with [`park`].
+//! - **Unparking** &mdash; unpausing a thread that was queued on an address.
+//! This can be done with [`unpark_one`], [`unpark_some`] and [`unpark_all`].
+//!
+//! For more information read the function docs.
+//!
+//! # [`loom`]
+//! This crate has [`loom 0.7`][`loom`] integrated, which can be enabled with
+//! `--cfg loom` and optionally the [`loom-test`](#features) feature. Using the
+//! feature is recommended, but if it's not present, legacy [`loom`] testing will
+//! be enabled.
+//!
+//! > ## Legacy [`loom`]
+//! >
+//! > [`loom`] requires consistency in it's executions, but program addresses are
+//! > intentionally random on most platforms. As such, when using legacy [`loom`],
+//! > there are things to keep in mind. When [`parking`](park) on different addresses, there
+//! > are two possible outcomes: they may map to the same bucket, which may provide extra
+//! > synchronisation, or different ones, which doesn't. This additional synchronisation
+//! > shouldn't be relied on &mdash; the only way to guarantee the same bucket when not
+//! > running [`loom`] is to use the same address with [`park`]. To give users control over
+//! > this, when running legacy [`loom`], there are 2 buckets: one for even addresses, one
+//! > for odd addresses. In loom tests you should at least include the case with different
+//! > buckets, since a shared bucket will provide more synchronisation and it shouldn't really
+//! > be possible that looser synchronisation will exclude the states possible with stricter
+//! > ones. One approach is to use a base address, and a second parking address can be made
+//! > with a [`cast`][cast] to [`u8`][u8] and then [`offsetting`][offset] by 1. For example,
+//! > when implementing a SPSC channel, the sender could park on *`<address of inner state>`*
+//! > and the receiver on <code style="white-space: nowrap;">
+//! > <i>\<address of inner state></i>.[cast]::<[u8]>().[offset]`(1)`
+//! > </code> to park on different buckets. A nice property of this approach is that it also
+//! > works in non-loom contexts where normally you would park on two non-ZST members.
+//! >
+//! > ### Limitations
+//! >
+//! > The legacy [`loom`] integration technique has some major drawbacks:
+//! >
+//! > - No more than 2 distinct addresses can be used if you want to properly test the case of
+//! > non-colliding buckets.
+//! > - Requires some extra work to use [`loom`].
+//! > - Dependents of dependents of [`sparking-lot-core`](crate) can't really use loom tests, because
+//! > it can easily become impossible to test the case of non-colliding buckets.
+//!
+//! # Features
+//!
+//! - `more-concurrency` - increases the number of buckets, which reduces contention,
+//! but requires more memory. This flag is unlikely to produce meaningful results if
+//! thread count is below 100, but it also isn't all that expensive &mdash; in the
+//! worst case it uses 24 extra KiB of RAM (adds ~12 KiB for x86-64).
+//! - `loom-test` - enables better [`loom`] tests. Has no effect without `--cfg loom`.
+//! - `thread-parker` - changes the parking implementation from a [`std::sync::Mutex`]
+//! to a [`std::thread::park`] based one. It may or may not perform better.
+//!
+//! [`WTF::ParkingLot`]: https://webkit.org/blog/6161/locking-in-webkit/
+//! [`futexes`]: http://man7.org/linux/man-pages/man2/futex.2.html
+//! [`loom`]: https://crates.io/crates/loom/0.7.0
+//! [`byte_offset`]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.byte_offset
+//! [u8]: https://doc.rust-lang.org/stable/core/primitive.u8.html
+//! [cast]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.cast
+//! [offset]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.offset
 
 #[cfg(not(all(loom, feature = "loom-test")))]
 mod real;
@@ -28,7 +104,7 @@ use fake::parking_lot;
 ///
 /// # Notes
 ///
-/// - The memory pointed to by `addr` isn't writter to,
+/// - The memory pointed to by `addr` isn't written to,
 /// it isn't read and no references to it are formed.
 /// - `expected` is called under a lock, which could block
 /// other [`park`], [`unpark_one`], [`unpark_some`] or
@@ -76,7 +152,7 @@ pub unsafe fn park(addr: *const (), expected: impl FnOnce() -> bool) {
 ///
 /// # Notes
 ///
-/// - The memory pointed to by `addr` isn't writter to,
+/// - The memory pointed to by `addr` isn't written to,
 /// it isn't read and no references to it are formed.
 /// - If no thread is waiting on `addr`, no thread is
 /// woken, but it still requires locking, so it's not
@@ -139,7 +215,7 @@ pub fn unpark_one(addr: *const ()) {
 ///
 /// # Notes
 ///
-/// - The memory pointed to by `addr` isn't writter to,
+/// - The memory pointed to by `addr` isn't written to,
 /// it isn't read and no references to it are formed.
 /// - If no thread is waiting on `addr`, no thread is
 /// woken, but it still requires locking, so it's not
@@ -210,7 +286,7 @@ pub fn unpark_some(addr: *const (), count: usize) {
 ///
 /// # Notes
 ///
-/// - The memory pointed to by `addr` isn't writter to,
+/// - The memory pointed to by `addr` isn't written to,
 /// it isn't read and no references to it are formed.
 /// - If no thread is waiting on `addr`, no thread is
 /// woken, but it still requires locking, so it's not
