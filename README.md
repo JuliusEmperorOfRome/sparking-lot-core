@@ -3,7 +3,7 @@
 [`s(implified-)parking-lot-core`][me] is a simplified version of [`parking_lot_core`],
 the backend of [`parking_lot`]. It doesn't include timeouts and park or unpark
 tokens, and doesn't readjust based on thread count, so going above certain thread
-counts (96 by default, 384 with the [`more-concurrency`](#features) feature), will
+counts (96 by default, 384 with the `more-concurrency` feature), will
 lead to worse scaling than [`parking_lot_core`]. However, it has static memory usage
 and, most importantly, [`sparking-lot-core`][me] has **[`loom 0.7`][`loom`]**
 support with `--cfg loom` for concurrency testing.
