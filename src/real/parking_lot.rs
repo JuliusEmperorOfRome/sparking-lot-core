@@ -1,6 +1,6 @@
 use crate::real::loom::{Cell, Mutex, MutexGuard};
-use crate::real::park::Parker;
-use core::ptr::{self, NonNull};
+use crate::real::park::{Parker, ParkerT};
+use core::ptr::{self, addr_of, NonNull};
 
 #[cfg(all(not(loom), not(feature = "more-concurrency")))]
 // parking-lot uses a max load factor of 3,
@@ -142,16 +142,21 @@ fn lock_bucket(addr: *const ()) -> MutexGuard<'static, Bucket> {
 
 #[inline(always)]
 fn with_thread_data<R>(f: impl FnOnce(&ThreadData) -> R) -> R {
-    #[cfg(not(loom))]
-    thread_local!(static THREAD_DATA: ThreadData = const {ThreadData::new()});
-    #[cfg(loom)]
-    loom::thread_local!(static THREAD_DATA: ThreadData = ThreadData::new());
-    match THREAD_DATA.try_with(|x| x as *const _) {
-        Ok(ptr) => unsafe { f(&*ptr) },
-        Err(_) => {
-            let td = ThreadData::new();
-            f(&td)
+    if !Parker::CHEAP_NEW {
+        #[cfg(not(loom))]
+        thread_local!(static THREAD_DATA: ThreadData = const {ThreadData::new()});
+        #[cfg(loom)]
+        loom::thread_local!(static THREAD_DATA: ThreadData = ThreadData::new());
+        match THREAD_DATA.try_with(|x| x as *const _) {
+            Ok(ptr) => unsafe { f(&*ptr) },
+            Err(_) => {
+                let td = ThreadData::new();
+                f(&td)
+            }
         }
+    } else {
+        let td = ThreadData::new();
+        f(&td)
     }
 }
 
@@ -232,7 +237,10 @@ pub(crate) fn park(addr: *const (), expected: impl FnOnce() -> bool) {
             }))
         };
 
-        thread_data.parker.park();
+        //SAFETY: `park` only called on this thread.
+        unsafe {
+            thread_data.parker.park();
+        }
 
         //disengage panic guard
         core::mem::forget(on_panic);
@@ -265,7 +273,10 @@ pub(crate) fn unpark_one(addr: *const ()) {
                 // the thread to wake has been unlinked, release the lock
                 drop(bucket);
 
-                (*current).parker.unpark();
+                // since ThreadData lives until the thread is
+                // woken and threads sleep before `unpark` is
+                // called, `parker` is alive.
+                ParkerT::unpark(addr_of!((*current).parker));
                 return;
             }
             previous = current;
@@ -323,7 +334,10 @@ pub(crate) fn unpark_all(addr: *const ()) {
          */
         unsafe {
             let next = (*current).next.get();
-            (*current).parker.unpark();
+            // since ThreadData lives until the thread is
+            // woken and threads sleep before `unpark` is
+            // called, `parker` is alive.
+            ParkerT::unpark(addr_of!((*current).parker));
 
             // `ThreadData` is repr(C) and `next` is the first element, so
             // (`current` as *const Cell<_>) gives the address of `current->next`.
@@ -390,7 +404,10 @@ pub(crate) fn unpark_some(addr: *const (), mut count: usize) {
          */
         unsafe {
             let next = (*current).next.get();
-            (*current).parker.unpark();
+            // since ThreadData lives until the thread is
+            // woken and threads sleep before `unpark` is
+            // called, `parker` is alive.
+            ParkerT::unpark(addr_of!((*current).parker));
 
             // `ThreadData` is repr(C) and `next` is the first element, so
             // (`current` as *const Cell<_>) gives the address of `current->next`.

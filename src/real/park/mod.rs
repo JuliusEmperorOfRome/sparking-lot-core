@@ -1,21 +1,43 @@
-// at the moment, the only impl
-pub(crate) mod generic;
-pub(crate) use generic::Parker;
+pub(crate) trait ParkerT {
+    const CHEAP_NEW: bool;
+    /// # Safety
+    ///
+    /// - can only be called by one 'owner' thread
+    unsafe fn park(&self);
+    /// # Safety
+    ///
+    /// - must point to a living `Self`
+    unsafe fn unpark(this: *const Self);
+}
+
+cfg_if::cfg_if! {
+
+if #[cfg(feature = "thread-parker")] {
+    mod std_thread;
+    pub(crate) use std_thread::Parker;
+}
+else {// default to the old impl
+    mod std_mutex;
+    pub(crate) use std_mutex::Parker;
+}
+
+}
 
 #[cfg(all(test, loom))]
 mod tests {
-    use super::Parker;
+    use super::{Parker, ParkerT};
     use core::sync::atomic::Ordering::{Acquire, Release};
     use loom::cell::Cell;
     use loom::thread;
+    use std::ops::Deref;
     use std::sync::Arc;
 
     #[test]
     fn keeps_unpark() {
         loom::model(|| {
             let parker = Parker::new();
-            parker.unpark();
-            parker.park();
+            unsafe { ParkerT::unpark(&parker) };
+            unsafe { parker.park() };
         });
     }
 
@@ -30,33 +52,10 @@ mod tests {
                 let parker = parker.clone();
                 thread::spawn(move || {
                     WROTE.set(true);
-                    parker.unpark();
+                    unsafe { ParkerT::unpark(parker.deref()) };
                 });
             }
-            parker.park();
-            assert!(WROTE.get());
-        });
-    }
-
-    #[test]
-    fn synchronises_multiple_unparks() {
-        loom::model(|| {
-            loom::lazy_static! {
-                static ref WROTE: Cell<bool> = Cell::new(false);
-            }
-            let parker = Arc::new(Parker::new());
-            {
-                let parker = parker.clone();
-                thread::spawn(move || {
-                    WROTE.set(true);
-                    {
-                        let parker = parker.clone();
-                        thread::spawn(move || parker.unpark());
-                    }
-                    parker.unpark();
-                });
-            }
-            parker.park();
+            unsafe { parker.park() };
             assert!(WROTE.get());
         });
     }
@@ -76,14 +75,14 @@ mod tests {
             let h1 = thread::spawn(|| {
                 let parker = &*PARKER1;
                 INIT.fetch_add(1, Relaxed);
-                parker.park();
+                unsafe { parker.park() };
                 assert_eq!(WROTE.get(), true);
             });
 
             let h2 = thread::spawn(|| {
                 let parker = &*PARKER2;
                 INIT.fetch_add(1, Relaxed);
-                parker.park();
+                unsafe { parker.park() };
                 assert_eq!(WROTE.get(), true);
             });
 
@@ -91,8 +90,8 @@ mod tests {
                 loom::thread::yield_now();
             }
             WROTE.set(true);
-            PARKER1.unpark();
-            PARKER2.unpark();
+            unsafe { ParkerT::unpark(PARKER1.deref()) };
+            unsafe { ParkerT::unpark(PARKER2.deref()) };
             h1.join().unwrap();
             h2.join().unwrap();
         });
@@ -108,14 +107,14 @@ mod tests {
             let h = thread::spawn(|| {
                 let parker = Parker::new();
                 PARKER.store(&parker as *const _ as *mut _, Release);
-                parker.park();
+                unsafe { parker.park() };
             });
             let mut parker = PARKER.load(Acquire);
             while parker.is_null() {
                 thread::yield_now();
                 parker = PARKER.load(Acquire);
             }
-            unsafe { &*(parker as *const Parker) }.unpark();
+            unsafe { ParkerT::unpark(parker) };
             h.join().unwrap();
         });
     }

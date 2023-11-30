@@ -10,6 +10,8 @@ repository = "https://github.com/JuliusEmperorOfRome/sparking-lot-core"
 authors = ["Julius Janeliūnas"]
 
 [features]
+# New parker type, performance not compared to the old implementation.
+thread-parker = []
 # Increases memory consumption but now has smaller load
 # than parking-lot until 384 threads instead of 96.
 #
@@ -20,6 +22,9 @@ more-concurrency = []
 # DO NOT spawn real threads in tests.
 # Does nothing without `--cfg loom`.
 loom-test = []
+
+[dependencies]
+cfg-if = "1.0.0"
 
 [target.'cfg(loom)'.dependencies]
 loom = { version = "0.7", features = ["checkpoint"] }

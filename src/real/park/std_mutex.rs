@@ -19,8 +19,11 @@ impl Parker {
             condvar: Condvar::new(),
         }
     }
+}
 
-    pub(crate) fn park(&self) {
+impl super::ParkerT for Parker {
+    const CHEAP_NEW: bool = false;
+    unsafe fn park(&self) {
         /* # Note
          *
          * The only points in `park` and `unpark` that may panic are
@@ -51,15 +54,16 @@ impl Parker {
         }
     }
 
-    pub(crate) fn unpark(&self) {
-        // See note in `park`
-        let mut should_unpark = self.should_unpark.lock().unwrap();
+    unsafe fn unpark(this: *const Self) {
+        // The dereferences are valid since it's required that
+        // `this` is alive when the function begins, and it stays
+        // alive until the `should_unpark` guard is dropped.
+        let mut should_unpark = (*this).should_unpark.lock().unwrap();
         if !*should_unpark {
             *should_unpark = true;
-            self.condvar.notify_one();
+            (*this).condvar.notify_one();
         }
     }
 }
 
-unsafe impl Send for Parker {}
 unsafe impl Sync for Parker {}
