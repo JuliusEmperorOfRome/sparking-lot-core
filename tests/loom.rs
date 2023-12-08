@@ -7,6 +7,7 @@ use core::sync::atomic::{AtomicUsize as StdAtomUsize, Ordering::Relaxed};
 use std::sync::Arc;
 
 use sparking_lot_core as slc;
+use sparking_lot_core::DEFAULT_TOKEN;
 
 mod basic {
     use super::*;
@@ -20,10 +21,10 @@ mod basic {
                 let arc = arc.clone();
                 thread::spawn(move || {
                     arc.store(1, Relaxed);
-                    slc::unpark_one(0 as *const ());
+                    slc::unpark_one(0, DEFAULT_TOKEN);
                 })
             };
-            unsafe { slc::park(0 as *const (), || arc.load(Relaxed) == 0) };
+            unsafe { slc::park(0, || arc.load(Relaxed) == 0) };
             h.join().unwrap();
         });
     }
@@ -36,9 +37,7 @@ mod basic {
             let create_waiter = {
                 || {
                     let arc = arc.clone();
-                    thread::spawn(move || unsafe {
-                        slc::park(0 as *const (), || arc.load(Relaxed) == 0)
-                    })
+                    thread::spawn(move || unsafe { slc::park(0, || arc.load(Relaxed) == 0) })
                 }
             };
 
@@ -46,7 +45,7 @@ mod basic {
             let h2 = create_waiter();
 
             arc.store(1, Relaxed);
-            slc::unpark_some(0 as *const (), 2);
+            slc::unpark_some(0, 2, DEFAULT_TOKEN);
 
             h1.join().unwrap();
             h2.join().unwrap();
@@ -61,9 +60,7 @@ mod basic {
             let create_waiter = {
                 || {
                     let arc = arc.clone();
-                    thread::spawn(move || unsafe {
-                        slc::park(0 as *const (), || arc.load(Relaxed) == 0)
-                    })
+                    thread::spawn(move || unsafe { slc::park(0, || arc.load(Relaxed) == 0) })
                 }
             };
 
@@ -71,7 +68,7 @@ mod basic {
             let h2 = create_waiter();
 
             arc.store(1, Relaxed);
-            slc::unpark_all(0 as *const ());
+            slc::unpark_all(0, DEFAULT_TOKEN);
 
             h1.join().unwrap();
             h2.join().unwrap();
@@ -81,7 +78,7 @@ mod basic {
 
 fn spawn_waiter(addr: usize, arc: Arc<AtomicUsize>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        unsafe { slc::park(addr as *const (), || arc.load(Relaxed) == 0) };
+        unsafe { slc::park(addr, || arc.load(Relaxed) == 0) };
     })
 }
 
@@ -94,19 +91,19 @@ fn unpark_one_bucket_collision() {
             let arc1 = arc1.clone();
             thread::spawn(move || {
                 arc1.store(1, Relaxed);
-                slc::unpark_one(0 as *const ());
+                slc::unpark_one(0, DEFAULT_TOKEN);
             })
         };
         let h2 = {
             let arc2 = arc2.clone();
             thread::spawn(move || {
                 arc2.store(1, Relaxed);
-                slc::unpark_one(2 as *const ());
+                slc::unpark_one(2, DEFAULT_TOKEN);
             })
         };
-        unsafe { slc::park(0 as *const (), || arc1.load(Relaxed) == 0) };
+        unsafe { slc::park(0, || arc1.load(Relaxed) == 0) };
         h1.join().unwrap();
-        unsafe { slc::park(2 as *const (), || arc2.load(Relaxed) == 0) };
+        unsafe { slc::park(2, || arc2.load(Relaxed) == 0) };
         h2.join().unwrap();
     });
 }
@@ -121,11 +118,11 @@ fn unpark_some_walks_bucket() {
         let h2 = spawn_waiter(2, arc2.clone());
 
         arc1.store(1, Relaxed);
-        slc::unpark_some(0 as *const (), 1);
+        slc::unpark_some(0, 1, DEFAULT_TOKEN);
         h1.join().unwrap();
 
         arc2.store(1, Relaxed);
-        slc::unpark_some(2 as *const (), 1);
+        slc::unpark_some(2, 1, DEFAULT_TOKEN);
         h2.join().unwrap();
     })
 }
@@ -140,11 +137,11 @@ fn unpark_some_bucket_collision_lite() {
         let h2 = spawn_waiter(2, arc2.clone());
 
         arc1.store(1, Relaxed);
-        slc::unpark_some(0 as *const (), 2);
+        slc::unpark_some(0, 2, DEFAULT_TOKEN);
         h1.join().unwrap();
 
         arc2.store(1, Relaxed);
-        slc::unpark_some(2 as *const (), 2);
+        slc::unpark_some(2, 2, DEFAULT_TOKEN);
         h2.join().unwrap();
     });
 }
@@ -164,7 +161,7 @@ fn unpark_some_is_bounded_lite() {
         let mut ts: [_; 2] = std::array::from_fn(|i| {
             let arc = arc.clone();
             Some(thread::spawn(move || unsafe {
-                slc::park(0 as *const (), || {
+                slc::park(0, || {
                     /* This atomic isn't loom, but because it's
                      * at the beginning of the thread, loom also
                      * tests the case where this isn't set by
@@ -183,7 +180,7 @@ fn unpark_some_is_bounded_lite() {
             }))
         });
         arc.park_token.store(0, Relaxed);
-        slc::unpark_some(0 as *const (), 1);
+        slc::unpark_some(0, 1, DEFAULT_TOKEN);
 
         match arc.first_park_index.load(Relaxed) {
             x if x == !0 => {}
@@ -192,7 +189,7 @@ fn unpark_some_is_bounded_lite() {
             }
         }
 
-        slc::unpark_one(0 as *const ());
+        slc::unpark_one(0, DEFAULT_TOKEN);
 
         for mut t in ts {
             t.take().map(|t| t.join().unwrap());
@@ -210,11 +207,11 @@ fn unpark_all_bucket_collision_lite() {
         let h2 = spawn_waiter(2, arc2.clone());
 
         arc1.store(1, Relaxed);
-        slc::unpark_all(0 as *const ());
+        slc::unpark_all(0, DEFAULT_TOKEN);
         h1.join().unwrap();
 
         arc2.store(1, Relaxed);
-        slc::unpark_all(2 as *const ());
+        slc::unpark_all(2, DEFAULT_TOKEN);
         h2.join().unwrap();
     });
 }
@@ -280,7 +277,7 @@ impl MagicParkToken {
     /// adds more cases it considers errors, but no new legal executions are made. When it
     /// does park, the synchronisation is caused by real code, not `MagicParkToken`, so it's
     /// valid to assume it there.
-    unsafe fn spawn_waiter(&'static self, addr: *const ()) -> thread::JoinHandle<()> {
+    unsafe fn spawn_waiter(&'static self, addr: usize) -> thread::JoinHandle<()> {
         thread::spawn(move || {
             unsafe { slc::park(addr, || self.can_park()) };
         })
@@ -308,7 +305,7 @@ fn unpark_some_is_bounded_full() {
         let mut ts: [_; 3] = std::array::from_fn(|i| {
             let arc = arc.clone();
             Some(thread::spawn(move || unsafe {
-                slc::park(0 as *const (), || {
+                slc::park(0, || {
                     /* These atomics aren't loom, but because it's
                      * at the beginning of the thread, loom also
                      * tests the case where this isn't done by
@@ -333,7 +330,7 @@ fn unpark_some_is_bounded_full() {
             }))
         });
         arc.park_token.store(0, Relaxed);
-        slc::unpark_some(0 as *const (), 2);
+        slc::unpark_some(0, 2, DEFAULT_TOKEN);
 
         match arc.first_park_index.load(Relaxed) {
             x if x == !0 => {}
@@ -346,7 +343,7 @@ fn unpark_some_is_bounded_full() {
             }
         }
 
-        slc::unpark_one(0 as *const ());
+        slc::unpark_one(0, DEFAULT_TOKEN);
 
         for mut t in ts {
             t.take().map(|t| t.join().unwrap());
@@ -368,19 +365,19 @@ fn unpark_all_bucket_collision_var1() {
          */
         let (h1, h2, h3) = unsafe {
             (
-                TOKEN1.spawn_waiter(0 as *const ()),
-                TOKEN1.spawn_waiter(0 as *const ()),
-                TOKEN2.spawn_waiter(2 as *const ()),
+                TOKEN1.spawn_waiter(0),
+                TOKEN1.spawn_waiter(0),
+                TOKEN2.spawn_waiter(2),
             )
         };
 
         TOKEN1.stop_parks();
-        slc::unpark_all(0 as *const ());
+        slc::unpark_all(0, DEFAULT_TOKEN);
         h1.join().unwrap();
         h2.join().unwrap();
 
         TOKEN2.stop_parks();
-        slc::unpark_all(2 as *const ());
+        slc::unpark_all(2, DEFAULT_TOKEN);
         h3.join().unwrap();
     });
 }
@@ -400,18 +397,18 @@ fn unpark_all_bucket_collision_var2() {
          */
         let (h1, h2, h3) = unsafe {
             (
-                TOKEN1.spawn_waiter(0 as *const ()),
-                TOKEN1.spawn_waiter(0 as *const ()),
-                TOKEN2.spawn_waiter(2 as *const ()),
+                TOKEN1.spawn_waiter(0),
+                TOKEN1.spawn_waiter(0),
+                TOKEN2.spawn_waiter(2),
             )
         };
 
         TOKEN2.stop_parks();
-        slc::unpark_all(2 as *const ());
+        slc::unpark_all(2, DEFAULT_TOKEN);
         h3.join().unwrap();
 
         TOKEN1.stop_parks();
-        slc::unpark_all(0 as *const ());
+        slc::unpark_all(0, DEFAULT_TOKEN);
         h1.join().unwrap();
         h2.join().unwrap();
     });
@@ -435,19 +432,19 @@ fn unpark_some_bucket_collision_var1() {
          */
         let (h1, h2, h3) = unsafe {
             (
-                TOKEN1.spawn_waiter(0 as *const ()),
-                TOKEN1.spawn_waiter(0 as *const ()),
-                TOKEN2.spawn_waiter(2 as *const ()),
+                TOKEN1.spawn_waiter(0),
+                TOKEN1.spawn_waiter(0),
+                TOKEN2.spawn_waiter(2),
             )
         };
 
         TOKEN1.stop_parks();
-        slc::unpark_some(0 as *const (), 4);
+        slc::unpark_some(0, 4, DEFAULT_TOKEN);
         h1.join().unwrap();
         h2.join().unwrap();
 
         TOKEN2.stop_parks();
-        slc::unpark_some(2 as *const (), 2);
+        slc::unpark_some(2, 2, DEFAULT_TOKEN);
         h3.join().unwrap();
     });
 }
@@ -470,18 +467,18 @@ fn unpark_some_bucket_collision_var2() {
          */
         let (h1, h2, h3) = unsafe {
             (
-                TOKEN1.spawn_waiter(0 as *const ()),
-                TOKEN1.spawn_waiter(0 as *const ()),
-                TOKEN2.spawn_waiter(2 as *const ()),
+                TOKEN1.spawn_waiter(0),
+                TOKEN1.spawn_waiter(0),
+                TOKEN2.spawn_waiter(2),
             )
         };
 
         TOKEN2.stop_parks();
-        slc::unpark_some(2 as *const (), 4);
+        slc::unpark_some(2, 4, DEFAULT_TOKEN);
         h3.join().unwrap();
 
         TOKEN1.stop_parks();
-        slc::unpark_some(0 as *const (), 3);
+        slc::unpark_some(0, 3, DEFAULT_TOKEN);
         h1.join().unwrap();
         h2.join().unwrap();
     });

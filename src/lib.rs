@@ -77,15 +77,23 @@
 //! [cast]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.cast
 //! [offset]: https://doc.rust-lang.org/stable/core/primitive.pointer.html#method.offset
 
-#[cfg(not(all(loom, feature = "loom-test")))]
-mod real;
-#[cfg(not(all(loom, feature = "loom-test")))]
-use real::parking_lot;
+mod parking_lot;
 
-#[cfg(all(loom, feature = "loom-test"))]
-mod fake;
-#[cfg(all(loom, feature = "loom-test"))]
-use fake::parking_lot;
+/// A token sent to [`park`] from [`unpark_one`], [`unpark_some`] or [`unpark_all`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Token(pub u32);
+
+/// A [`Token`] value to be used when it's not needed.
+pub const DEFAULT_TOKEN: Token = Token(0);
+
+/// The result of a [`park`] operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParkResult {
+    /// The thread was woken with the given [`Token`].
+    Unparked(Token),
+    /// The `expected` of [`park`] returned false.
+    Unexpected,
+}
 
 /// Parks the current thread on `addr` until notified,
 /// but only if `expected` returns true.
@@ -122,27 +130,35 @@ use fake::parking_lot;
 ///
 /// ```rust,no_run
 /// use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+/// use sparking_lot_core::{park, unpark_one, ParkResult, Token};
 /// static WAKE_UP: AtomicBool = AtomicBool::new(false);
 ///
 /// fn wait_for_event() {
 ///     //SAFETY: remember not to park on WAKE_UP in unrelated functions.
-///     unsafe {
-///         sparking_lot_core::park(&WAKE_UP as *const _ as *const _, || {
+///     let result = unsafe {
+///         park(&WAKE_UP as *const _ as usize, || {
 ///             WAKE_UP.load(Relaxed) == false
 ///         })
+///     };
+///     match result {
+///         ParkResult::Unparked(token) => assert_eq!(token, Token(42)),
+///         ParkResult::Unexpected => {/* WAKE_UP was true */},
 ///     }
 /// }
 ///
 /// fn notify_event_happened() {
 ///     //If these lines are reordered park may miss this notification
 ///     WAKE_UP.store(true, Relaxed);
-///     sparking_lot_core::unpark_one(&WAKE_UP as *const _ as *const _)
+///     sparking_lot_core::unpark_one(&WAKE_UP as *const _ as usize, Token(42));
 /// }
 /// ```
 #[cfg_attr(not(loom), inline(always))]
 #[cfg_attr(loom, track_caller)]
-pub unsafe fn park(addr: *const (), expected: impl FnOnce() -> bool) {
-    parking_lot::park(addr, expected)
+pub unsafe fn park(addr: usize, expected: impl FnOnce() -> bool) -> ParkResult {
+    match parking_lot::park(addr, expected) {
+        Some(token) => ParkResult::Unparked(Token(token)),
+        None => ParkResult::Unexpected,
+    }
 }
 
 /// Wakes one thread [`parked`](park()) on `addr`.
@@ -171,7 +187,7 @@ pub unsafe fn park(addr: *const (), expected: impl FnOnce() -> bool) {
 /// use core::sync::atomic::AtomicBool;
 /// use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 ///
-/// use sparking_lot_core::{park, unpark_one};
+/// use sparking_lot_core::{park, unpark_one, DEFAULT_TOKEN};
 ///
 /// struct BadMutex(AtomicBool);
 ///
@@ -190,22 +206,22 @@ pub unsafe fn park(addr: *const (), expected: impl FnOnce() -> bool) {
 ///              * - owned address
 ///              */
 ///             unsafe {
-///                 park(self as *const _ as *const _, || self.0.load(Acquire));
+///                 park(self as *const _ as usize, || self.0.load(Acquire));
 ///             }
 ///         }
 ///     }
 ///
 ///     fn unlock(&self) {
 ///         self.0.store(false, Release);
-///         unpark_one(self as *const _ as *const _);
+///         unpark_one(self as *const _ as usize, DEFAULT_TOKEN);
 ///     }
 /// }
 ///
 /// ```
 #[cfg_attr(not(loom), inline(always))]
 #[cfg_attr(loom, track_caller)]
-pub fn unpark_one(addr: *const ()) {
-    parking_lot::unpark_one(addr);
+pub fn unpark_one(addr: usize, token: Token) {
+    parking_lot::unpark_one(addr, token.0);
 }
 
 /// Wakes at most `count` threads [`parked`](park()) on `addr`.
@@ -238,7 +254,7 @@ pub fn unpark_one(addr: *const ()) {
 /// #     fn push_task(&self, _: Task) {}
 /// #     fn pop_task(&self) -> Option<Task> { None }
 /// # }
-/// use sparking_lot_core::{park, unpark_some};
+/// use sparking_lot_core::{park, unpark_some, DEFAULT_TOKEN};
 ///
 /// static tasks: YourTaskQueue = YourTaskQueue::new();
 ///
@@ -248,7 +264,7 @@ pub fn unpark_one(addr: *const ()) {
 ///         tasks.push_task(t);
 ///         count += 1;
 ///     }
-///     unpark_some(&tasks as *const _ as *const _, count);
+///     unpark_some(&tasks as *const _ as usize, count, DEFAULT_TOKEN);
 /// }
 ///
 /// fn get_task() -> Task {
@@ -265,7 +281,7 @@ pub fn unpark_one(addr: *const ()) {
 ///              * - no calls to sparking_lot_core funtions in closure
 ///              * - the task queue **has to be** be private
 ///              */
-///             park(&tasks as *const _ as *const _, || {
+///             park(&tasks as *const _ as usize, || {
 ///                 task = tasks.pop_task();
 ///                 task.is_none()
 ///             });
@@ -275,8 +291,8 @@ pub fn unpark_one(addr: *const ()) {
 /// ```
 #[cfg_attr(not(loom), inline(always))]
 #[cfg_attr(loom, track_caller)]
-pub fn unpark_some(addr: *const (), count: usize) {
-    parking_lot::unpark_some(addr, count);
+pub fn unpark_some(addr: usize, count: usize, token: Token) {
+    parking_lot::unpark_some(addr, count, token.0);
 }
 
 /// Wakes all threads [`parked`](park()) on `addr`.
@@ -305,7 +321,7 @@ pub fn unpark_some(addr: *const (), count: usize) {
 /// use core::sync::atomic::AtomicUsize;
 /// use core::sync::atomic::Ordering::{AcqRel, Acquire};
 ///
-/// use sparking_lot_core::{park, unpark_all};
+/// use sparking_lot_core::{park, unpark_all, DEFAULT_TOKEN};
 ///
 /// struct Latch(AtomicUsize);
 ///
@@ -316,7 +332,7 @@ pub fn unpark_some(addr: *const (), count: usize) {
 ///
 ///     fn wait(&self) {
 ///         if self.0.fetch_sub(1, AcqRel) == 1 {
-///             unpark_all(self as *const _ as *const _);
+///             unpark_all(self as *const _ as usize, DEFAULT_TOKEN);
 ///         }
 ///         else {
 ///             /* SAFETY:
@@ -324,7 +340,7 @@ pub fn unpark_some(addr: *const (), count: usize) {
 ///              * - owned address
 ///              */
 ///             unsafe {
-///                 park(self as *const _ as *const _, || self.0.load(Acquire) != 0);   
+///                 park(self as *const _ as usize, || self.0.load(Acquire) != 0);   
 ///             }
 ///         }
 ///     }
@@ -332,6 +348,6 @@ pub fn unpark_some(addr: *const (), count: usize) {
 /// ```
 #[cfg_attr(not(loom), inline(always))]
 #[cfg_attr(loom, track_caller)]
-pub fn unpark_all(addr: *const ()) {
-    parking_lot::unpark_all(addr);
+pub fn unpark_all(addr: usize, token: Token) {
+    parking_lot::unpark_all(addr as usize, token.0);
 }

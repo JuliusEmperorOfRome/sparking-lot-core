@@ -2,7 +2,7 @@
 name = "sparking-lot-core"
 description = "A simple implementation of parking on addresses."
 license = "MIT"
-version = "0.1.3"
+version = "0.2.0"
 edition = "2021"
 categories = ["concurrency"]
 readme = "README.md"
@@ -10,18 +10,13 @@ repository = "https://github.com/JuliusEmperorOfRome/sparking-lot-core"
 authors = ["Julius Janeliūnas"]
 
 [features]
-# New parker type, performance not compared to the old implementation.
-thread-parker = []
 # Increases memory consumption but now has smaller load
 # than parking-lot until 384 threads instead of 96.
 #
 # Note that memory consumption is static and
 # in the worst case goes to ~32Kib.
 more-concurrency = []
-# The recommended way of testing loom.
-# DO NOT spawn real threads in tests.
-# Does nothing without `--cfg loom`.
-loom-test = []
+legacy-loom = []
 
 [dependencies]
 cfg-if = "1.0.0"
