@@ -15,22 +15,6 @@ use core::ptr::{self, addr_of, NonNull};
 mod parker;
 use parker::Parker;
 
-#[cfg(all(not(loom), not(feature = "more-concurrency")))]
-// parking-lot uses a max load factor of 3,
-// so 32(1 << 5) buckets is enough for 96 threads. In
-// the case that more threads use sparking-lot,
-// it will perform worse than parking-lot and
-// that's acceptable
-const BUCKET_BITS: usize = 5;
-#[cfg(all(not(loom), feature = "more-concurrency"))]
-// In this case, performs better until 384 threads instead
-const BUCKET_BITS: usize = 7;
-#[cfg(loom)]
-// Reduce load for loom
-const BUCKET_BITS: usize = 1;
-
-const BUCKET_COUNT: usize = 1 << BUCKET_BITS;
-
 pub(crate) fn park(addr: usize, expected: impl FnOnce() -> bool) -> Option<u32> {
     let bucket = lock_bucket(addr);
     if !expected() {
@@ -253,6 +237,45 @@ struct ThreadData {
 }
 
 fn lock_bucket(addr: usize) -> MutexGuard<'static, Bucket> {
+    use cfg_if::cfg_if;
+    cfg_if! {
+
+    if #[cfg(not(loom))] {
+        cfg_if! {
+
+        if #[cfg(not(feature = "more-concurrency"))] {
+            // parking-lot uses a max load factor of 3,
+            // so 32(1 << 5) buckets is enough for 96 threads. In
+            // the case that more threads use sparking-lot,
+            // it will perform worse than parking-lot and
+            // that's acceptable
+            const BUCKET_BITS: usize = 5;
+        }
+        else {
+            // In this case, performs better until 384 threads instead
+            const BUCKET_BITS: usize = 7;
+        }
+
+        }
+    }
+    else {
+        cfg_if! {
+
+        if #[cfg(feature = "legacy-loom")] {
+            const BUCKET_BITS: usize = 1;
+        }
+        else {
+            // allows up to 32 different addresses
+            const BUCKET_BITS: usize = 5;
+        }
+
+        }
+    }
+
+    }
+
+    const BUCKET_COUNT: usize = 1 << BUCKET_BITS;
+
     struct Hashtable {
         buckets: [Slot; BUCKET_COUNT],
     }
@@ -292,15 +315,49 @@ fn lock_bucket(addr: usize) -> MutexGuard<'static, Bucket> {
             .expect("`expexcted` paniced in a previous `park` call")
         }
 
-        /* loom tests with checkpoints can't rely on
-         * addresses, and this allows users to write
-         * `n as *const()` to select buckets, but still
-         * kind of works with addresses with disabled
-         * loom checkpoints.
-         */
-        #[cfg(loom)]
+        // Legacy loom tests use an odd and even address buckets
+        #[cfg(all(loom, feature = "legacy-loom"))]
         fn hash(n: usize) -> usize {
             n & (BUCKET_COUNT - 1)
+        }
+
+        #[cfg(all(loom, not(feature = "legacy-loom")))]
+        fn hash(n: usize) -> usize {
+            use std::cell::RefCell;
+            struct AddrMap {
+                addrs: [usize; BUCKET_COUNT],
+                count: usize,
+            }
+
+            impl AddrMap {
+                fn new() -> Self {
+                    Self {
+                        addrs: [0; BUCKET_COUNT],
+                        count: 0,
+                    }
+                }
+
+                fn to_index(&mut self, addr: usize) -> usize {
+                    let end = self.count;
+                    for (i, a) in self.addrs[0..end].iter().enumerate() {
+                        if *a == addr {
+                            return i;
+                        }
+                    }
+                    assert_ne!(
+                        end, BUCKET_COUNT,
+                        "[sparking-lot-core] can't use more than {BUCKET_COUNT} different addresses in loom tests"
+                    );
+                    let last = end;
+                    self.count += 1;
+
+                    self.addrs[last] = addr;
+                    return last;
+                }
+            }
+
+            loom::lazy_static!(static ref MAP: RefCell<AddrMap> = RefCell::new(AddrMap::new()););
+            MAP.borrow_mut().to_index(n)
         }
 
         #[cfg(not(loom))]
